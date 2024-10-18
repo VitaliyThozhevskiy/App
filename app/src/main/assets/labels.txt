@@ -1,0 +1,6 @@
+Airplane
+Helicopter
+Person
+Tank
+Vehicle
+airplane
