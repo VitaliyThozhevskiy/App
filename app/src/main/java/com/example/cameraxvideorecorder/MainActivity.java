@@ -15,12 +15,8 @@ import android.graphics.Matrix;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Surface;
-import android.view.View;
 import android.view.Window;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
@@ -38,9 +34,12 @@ import androidx.camera.core.ImageAnalysis;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import com.example.cameraxvideorecorder.common.Config;
+import com.example.cameraxvideorecorder.common.DetectedTargetsData;
 import com.example.cameraxvideorecorder.common.FcCommon;
 import com.example.cameraxvideorecorder.common.FcInfo;
-import com.example.cameraxvideorecorder.infrastructure.DDService;
+import com.example.cameraxvideorecorder.common.Messages;
+import com.example.cameraxvideorecorder.infrastructure.AutopilotService;
 import com.example.cameraxvideorecorder.infrastructure.Serial;
 import com.google.common.util.concurrent.ListenableFuture;
 
@@ -60,17 +59,17 @@ public class MainActivity extends AppCompatActivity {
     private Detector targetDetector;
     public static String versionName;
     private MainActivity activity;
-    private Button bStartStopService;
+    private Button bStartMission;
     private LinearLayout main;
     Spinner connectionMode;
-    EditText etIp, etPort, etKey;
-    private TextView tvNetworkStatus, tvFcStatus, tvConnectionModeHint;
-    CheckBox cbConnectOnStartup;
+    public EditText etAzimuth, etDistance, etFlyHeight, etFlySpeed;
+    private TextView tvFcStatus;
     private Timer uiTimer;
     private boolean isPaused = false;
-    TextView result = null;
     ExecutorService service;
     Camera camera = null;
+    public static Config config = null;
+    private boolean detectTargets = false;
 
     private final ActivityResultLauncher<String> activityResultLauncher = registerForActivityResult(new ActivityResultContracts.RequestPermission(), result -> {
         if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -90,21 +89,29 @@ public class MainActivity extends AppCompatActivity {
 
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         setContentView(R.layout.activity_main);
+        config = new Config(this);
         activity = this;
         main = findViewById(R.id.llMain);
         main.setKeepScreenOn(true);
-        bStartStopService = findViewById(R.id.startStopService);
-        bStartStopService.setOnClickListener(v -> {
-            if (checkPermissions()) startStopService();
+        bStartMission = findViewById(R.id.start_mission);
+        bStartMission.setOnClickListener(v -> {
+            config.updateConfig();
+            Messages.onStartMission.postValue(config);
         });
-        etIp = findViewById(R.id.editText_ip);
-        etPort = findViewById(R.id.editText_port);
-        etKey = findViewById(R.id.editText_key);
-        tvNetworkStatus = findViewById(R.id.tvNetworkConnectionStatus);
+
+        etAzimuth = findViewById(R.id.editText_azimuth);
+        etDistance = findViewById(R.id.editText_distance);
+        etFlyHeight = findViewById(R.id.editText_height);
+        etFlySpeed = findViewById(R.id.editText_speed);
+
+        etAzimuth.setText(String.valueOf(config.azimuth));
+        etDistance.setText(String.valueOf(config.distance));
+        etFlyHeight.setText(String.valueOf(config.flyHeight));
+        etFlySpeed.setText(String.valueOf(config.flySpeed));
+
         tvFcStatus = findViewById(R.id.tvFcConnectionStatus);
-        tvConnectionModeHint = findViewById(R.id.tvConnectionModeHint);
-        connectionMode = findViewById(R.id.connectionMode);
-        if (!DDService.isRunning){
+
+        if (!AutopilotService.isRunning){
             new Thread(() -> {
                 try{
                     Thread.sleep(3000);
@@ -116,6 +123,7 @@ public class MainActivity extends AppCompatActivity {
 
         service = Executors.newSingleThreadExecutor();
 
+        checkPermissions();
         if (ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             activityResultLauncher.launch(Manifest.permission.CAMERA);
         } else {
@@ -124,17 +132,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateUi(){
-        if (DDService.isRunning){
-            bStartStopService.setText(getResources().getString(R.string.disconnect));
-            if (DDService.isConnected){
-                tvNetworkStatus.setText(getResources().getString(R.string.status_connected));
-                tvNetworkStatus.setTextColor(Color.GREEN);
-            }else{
-
-                tvNetworkStatus.setText(getResources().getString(R.string.status_awaiting_connection));
-                tvNetworkStatus.setTextColor(Color.BLACK);
-            }
-            int serialPortStatus = DDService.getSerialPortStatus();
+        if (AutopilotService.isRunning){
+            bStartMission.setActivated(true);
+            int serialPortStatus = AutopilotService.getSerialPortStatus();
             switch (serialPortStatus){
                 case Serial.STATUS_NOT_INITIALIZED:
                 case Serial.STATUS_DEVICE_NOT_CONNECTED:
@@ -164,7 +164,7 @@ public class MainActivity extends AppCompatActivity {
                 case Serial.STATUS_SERIAL_PORT_OPENED:
                     tvFcStatus.setTextColor(Color.BLUE);
                     String status = getResources().getString(R.string.fc_status_serial_port_opened);
-                    FcInfo fcInfo = DDService.getFcInfo();
+                    FcInfo fcInfo = AutopilotService.getFcInfo();
                     if (fcInfo == null){
                         status += getResources().getString(R.string.check_fc_version);
                     }else{
@@ -172,7 +172,7 @@ public class MainActivity extends AppCompatActivity {
                         status += " " + fcInfo.getFcName() + " Ver. " + fcInfo.getFcVersionStr()
                                 + " (" + fcInfo.getPlatformTypeName() + ") "
                                 + getResources().getString(R.string.detected);
-                        int fcApiCompatibilityLevel = DDService.getFcApiCompatibilityLevel();
+                        int fcApiCompatibilityLevel = AutopilotService.getFcApiCompatibilityLevel();
                         switch (fcApiCompatibilityLevel){
                             case FcCommon.FC_API_COMPATIBILITY_UNKNOWN:
                             case FcCommon.FC_API_COMPATIBILITY_ERROR:
@@ -189,30 +189,26 @@ public class MainActivity extends AppCompatActivity {
                     break;
             }
             connectionMode.setEnabled(false);
-            etIp.setEnabled(false);
-            etPort.setEnabled(false);
-            etKey.setEnabled(false);
-            cbConnectOnStartup.setEnabled(false);
+            connectionMode.setEnabled(true);
+            etAzimuth.setEnabled(true);
+            etDistance.setEnabled(true);
+            etFlyHeight.setEnabled(true);
+            etFlySpeed.setEnabled(true);
         }else{
-            bStartStopService.setText(getResources().getString(R.string.connect));
-            tvNetworkStatus.setText(getResources().getString(R.string.status_disconnected));
-            tvNetworkStatus.setTextColor(Color.RED);
             tvFcStatus.setText(getResources().getString(R.string.status_disconnected));
             tvFcStatus.setTextColor(Color.RED);
-            connectionMode.setEnabled(true);
-            etIp.setEnabled(true);
-            etPort.setEnabled(true);
-            etKey.setEnabled(true);
-            cbConnectOnStartup.setEnabled(true);
+            etAzimuth.setEnabled(false);
+            etDistance.setEnabled(false);
+            etFlyHeight.setEnabled(false);
+            etFlySpeed.setEnabled(false);
         }
     }
 
     private void startStopService(){
-        Intent intent = new Intent(getApplicationContext(), DDService.class);
-        if (DDService.isRunning){
+        Intent intent = new Intent(getApplicationContext(), AutopilotService.class);
+        if (AutopilotService.isRunning){
             stopService(intent);
         }else{
-            if (!config.updateConfig()) return;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 getApplicationContext().startForegroundService(intent);
             }else{
@@ -254,17 +250,25 @@ public class MainActivity extends AppCompatActivity {
 
                         Matrix matrix = new Matrix();
                         matrix.postRotate(imageProxy.getImageInfo().getRotationDegrees());
-
+                        var width = bitmapBuffer.getWidth();
+                        var height = bitmapBuffer.getHeight();
                         Bitmap rotatedBitmap = Bitmap.createBitmap(
-                                bitmapBuffer, 0, 0, bitmapBuffer.getWidth(), bitmapBuffer.getHeight(),
+                                bitmapBuffer, 0, 0, width, height,
                                 matrix, false
                         );
 
-                        var targetBoxes = targetDetector.detect(rotatedBitmap);
-                        var boxes = detector.detect(rotatedBitmap);
-                        var allBoxes = Stream.concat(targetBoxes.stream(), boxes.stream()).toArray();
+                        if (detectTargets){
+                            var targetBoxes = targetDetector.detect(rotatedBitmap);
+                            var boxes = detector.detect(rotatedBitmap);
+                            var data = new DetectedTargetsData();
+                            data.width = detector.tensorWidth;
+                            data.heigth = detector.tensorHeight;
+                            data.boundingBoxes = Stream.concat(targetBoxes.stream(), boxes.stream()).toArray(BoundingBox[]::new);
+
+                            Messages.onTargetsDetected.postValue(data);
+                        }
                     } catch(Throwable e){
-                        setText(e.toString());
+                        log(e.toString());
                     }
                 });
 
@@ -276,7 +280,7 @@ public class MainActivity extends AppCompatActivity {
                             imageAnalyzer);
 
             } catch (Exception e) {
-                e.printStackTrace();
+                log(e.toString());
             }
         }, ContextCompat.getMainExecutor(MainActivity.this));
     }
@@ -309,6 +313,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume(){
         super.onResume();
+        Messages.onStartCameraDetection.observe(this, value -> detectTargets = value);
         isPaused = false;
         main.setKeepScreenOn(true);
         updateUi();
@@ -320,12 +325,7 @@ public class MainActivity extends AppCompatActivity {
                     uiTimer.cancel();
                     return;
                 }
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        updateUi();
-                    }
-                });
+                runOnUiThread(() -> updateUi());
             }
         };
         uiTimer.schedule(tt, 10, 1000);
@@ -367,12 +367,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         service.shutdown();
-    }
-
-    private void setText(String s){
-        if(s != null && s != "")
-        runOnUiThread(() -> {
-            result.setText(s);
-        });
+        detector.clear();
+        targetDetector.clear();
     }
 }

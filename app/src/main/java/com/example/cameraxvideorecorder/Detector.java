@@ -36,8 +36,8 @@ public class Detector {
     private Interpreter interpreter;
     private List<String> labels = new ArrayList<>();
 
-    private int tensorWidth = 0;
-    private int tensorHeight = 0;
+    public int tensorWidth = 0;
+    public int tensorHeight = 0;
     private int numChannel = 0;
     private int numElements = 0;
 
