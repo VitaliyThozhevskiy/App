@@ -17,17 +17,17 @@
 
 package com.example.cameraxvideorecorder.infrastructure;
 
-
 import static com.example.cameraxvideorecorder.common.Logcat.log;
 
-import android.location.Location;
-import android.location.LocationManager;
-
+import com.example.cameraxvideorecorder.common.Config;
 import com.example.cameraxvideorecorder.common.DataReader;
 import com.example.cameraxvideorecorder.common.DataWriter;
+import com.example.cameraxvideorecorder.common.DetectedTargetsData;
 import com.example.cameraxvideorecorder.common.FcCommon;
 import com.example.cameraxvideorecorder.common.FcInfo;
+import com.example.cameraxvideorecorder.common.Messages;
 import com.example.cameraxvideorecorder.common.TelemetryData;
+import com.fasterxml.jackson.core.JsonProcessingException;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -73,19 +73,11 @@ public class Msp {
     private int onTime, flyTime, lastArmTime, flyTimeSave;
     private int[] rxMap = null;
     private int[] boxIds = null;
-    private int[] modeFlagsInav = null;
     private byte[] modeFlagsBtfl = null;
     private byte[] osdConfig = null;
     private boolean oldCamSwitchState;
-    private int rcMinPeriod;
-    private long rcLastFrame;
     private int platformType;
-    private FcCommon.GpsFixTypes fixType = FcCommon.GpsFixTypes.GPS_NO_FIX;
-    boolean isArmed = false;
-    private float groundSpeed; // km/h
-    private float latDeg;
-    private float lonDeg;
-    private float traveledDistance; // m
+    boolean isArmed = false;// m
 
     public Msp(Serial serial){
         this.serial = serial;
@@ -141,22 +133,6 @@ public class Msp {
         serialDataThread.start();
     }
 
-    public void runGetBoxIds(){
-        runGetBoxIds = true;
-    }
-
-    public void runGetBoxNames(){
-        runGetBoxNames = true;
-    }
-
-    public void runGetOsdConfig(){
-        runGetOsdConfig = true;
-    }
-
-    public void runGetBatteryConfig(){
-        runGetBatteryConfig = true;
-    }
-
     public void close(){
         threadsId++;
         isInitialized = false;
@@ -194,9 +170,6 @@ public class Msp {
 
                     if (timerDiv % 5 == 0) {
                         switch (fcVariant){
-                            case FcInfo.FC_VARIANT_INAV:
-                                getInavStatus();
-                                break;
                             case FcInfo.FC_VARIANT_BETAFLIGHT:
                                 getStatus();
                                 break;
@@ -210,10 +183,6 @@ public class Msp {
                         timerDiv = 0;
                         if (runGetBoxNames || runGetBoxIds) {
                             switch (fcVariant){
-                                case FcInfo.FC_VARIANT_INAV:
-                                    if (runGetBoxIds) getBoxIds();
-                                    if (runGetBoxNames) getBoxNames();
-                                    break;
                                 case FcInfo.FC_VARIANT_BETAFLIGHT:
                                     if (runGetBoxIds) getBoxIds(bfBoxIdsPage);
                                     if (runGetBoxNames) getBoxNames(bfBoxNamesPage);
@@ -223,20 +192,13 @@ public class Msp {
                         if (runGetOsdConfig) getOsdConfig();
                         if (runGetRxMap) getRxMap();
                         if (runGetBatteryConfig) {
-                            if (fcVariant == FcInfo.FC_VARIANT_INAV){
-                                runGetBatteryConfig = false;
-                            }else {
-                                getBatteryConfig();
-                            }
+                           getBatteryConfig();
                         }
                         getBatteryState();
                         getRawGps();
                         getCompGps();
                         getVtxConfig();
                         switch (fcVariant){
-                            case FcInfo.FC_VARIANT_INAV:
-                                getInavAnalog();
-                                break;
                             case FcInfo.FC_VARIANT_BETAFLIGHT:
                                 getAnalog();
                                 break;
@@ -372,7 +334,6 @@ public class Msp {
                         break;
                     case FcCommon.MSP_FC_VARIANT: {
                         String fcStr = buffer.readBufferAsString();
-                        if (FcInfo.INAV_ID.equals(fcStr)) fcVariant = FcInfo.FC_VARIANT_INAV;
                         if (FcInfo.BETAFLIGHT_ID.equals(fcStr))
                             fcVariant = FcInfo.FC_VARIANT_BETAFLIGHT;
                         break;
@@ -385,19 +346,8 @@ public class Msp {
                     case FcCommon.MSP_MIXER_CONFIG:
                         platformType = buffer.readUnsignedByteAsInt();
                         break;
-                    case FcCommon.MSP2_INAV_MIXER:
-                        buffer.readUnsignedByteAsInt();// motorDirectionInverted
-                        buffer.readUnsignedByteAsInt();// 0
-                        buffer.readUnsignedByteAsInt();// motorstopOnLow
-                        platformType = buffer.readUnsignedByteAsInt();
-                        break;
                     case FcCommon.MSP_BOXNAMES: {
                         switch (fcVariant) {
-                            case FcInfo.FC_VARIANT_INAV: {
-                                runGetBoxNames = false;
-                                telemetryOutputBuffer.offer(new TelemetryData(packet.code, buffer.getData()));
-                                break;
-                            }
                             case FcInfo.FC_VARIANT_BETAFLIGHT: {
                                 byte[] pageData = buffer.getData();
                                 if (bfBoxNamesPage > 0) {
@@ -439,12 +389,6 @@ public class Msp {
                     }
                     case FcCommon.MSP_BOXIDS: {
                         switch (fcVariant) {
-                            case FcInfo.FC_VARIANT_INAV: {
-                                runGetBoxIds = false;
-                                boxIds = FcCommon.getBoxIds(buffer.getData());
-                                telemetryOutputBuffer.offer(new TelemetryData(packet.code, buffer.getData()));
-                                break;
-                            }
                             case FcInfo.FC_VARIANT_BETAFLIGHT: {
                                 byte[] pageData = buffer.getData();
                                 if (bfBoxIdsPage > 0) {
@@ -515,30 +459,8 @@ public class Msp {
                             telemetryOutputBuffer.offer(new TelemetryData(FcCommon.MSP_OSD_CONFIG, osdConfig));
                         break;
                     }
-                    case FcCommon.MSP2_INAV_STATUS: {
-                        buffer.readShort();//cycleTime
-                        buffer.readShort();//i2cErrorCount
-                        buffer.readShort();//sensorStatus
-                        buffer.readShort();//averageSystemLoad
-                        buffer.readByte();//profiles
-                        buffer.readInt();//armingFlags
-                        int[] modeFlags = null;
-                        int modeFlagsSize = (int) Math.ceil((buffer.getRemaining() - 1) / 4.0);
-                        if (modeFlagsSize > 0) {
-                            modeFlags = new int[modeFlagsSize];
-                            for (int i = 0; i < modeFlagsSize; i++) {
-                                modeFlags[i] = buffer.readInt();
-                            }
-                        }
-                        this.modeFlagsInav = modeFlags;
-                        telemetryOutputBuffer.offer(new TelemetryData(packet.code, buffer.getData()));
-                        break;
-                    }
                     case FcCommon.MSP_STATUS: {
                         switch (fcVariant) {
-                            case FcInfo.FC_VARIANT_INAV:
-                                telemetryOutputBuffer.offer(new TelemetryData(packet.code, buffer.getData()));
-                                break;
                             case FcInfo.FC_VARIANT_BETAFLIGHT: {
                                 buffer.readShort();//cycleTime
                                 buffer.readShort();//i2cErrorCount
@@ -566,45 +488,10 @@ public class Msp {
                         }
                         break;
                     }
-                    case FcCommon.MSP_RAW_GPS: {
-                        byte fixType = buffer.readByte();
-                        byte numSat = buffer.readByte();
-                        int lat = buffer.readInt();
-                        int lon = buffer.readInt();
-                        short altGps = buffer.readShort();
-                        short groundSpeed = buffer.readShort();
-                        short groundCourse = buffer.readShort();
-                        short hdop = buffer.readShort();
-
-                        if (fixType >= 0 && fixType < FcCommon.GpsFixTypes.values().length) this.fixType = FcCommon.GpsFixTypes.values()[fixType];
-                        float latDeg = lat / 10000000f;
-                        float lonDeg = lon / 10000000f;
-                        this.groundSpeed = groundSpeed * 0.036f;
-                        calculateTraveledDist(latDeg, lonDeg);
-
-                        DataWriter wBuffer = new DataWriter(true);
-                        wBuffer.writeByte(fixType);
-                        wBuffer.writeByte(numSat);
-                        wBuffer.writeInt(lat);
-                        wBuffer.writeInt(lon);
-                        wBuffer.writeShort(altGps);
-                        wBuffer.writeShort(groundSpeed);
-                        wBuffer.writeShort(groundCourse);
-                        wBuffer.writeShort(hdop);
-                        wBuffer.writeInt(Math.round(traveledDistance));
-                        telemetryOutputBuffer.offer(new TelemetryData(packet.code, wBuffer.getData()));
-                        break;
+                    case FcCommon.MSP_START_CAMERA_DETECTION: {
+                        Messages.onStartCameraDetection.setValue(true);
                     }
-                    case FcCommon.MSP_ATTITUDE:
-                    case FcCommon.MSP_ALTITUDE:
-                    case FcCommon.MSP_ANALOG:
-                    case FcCommon.MSP_VTX_CONFIG:
-                    case FcCommon.MSP_BATTERY_STATE:
-                    case FcCommon.MSP_COMP_GPS:
-                    case FcCommon.MSP2_INAV_ANALOG: {
-                        telemetryOutputBuffer.offer(new TelemetryData(packet.code, buffer.getData()));
-                        break;
-                    }
+                    break;
                 }
             } catch (Exception e) {
                 log("MSP - processData error: " + e + ", MSP code: " + packet.code);
@@ -612,33 +499,11 @@ public class Msp {
         }
     }
 
-    private void calculateTraveledDist(float newLatDeg, float newLonDeg){
-        if (!checkGpsFix()) return;
-        if (groundSpeed > 0.2f && this.latDeg != 0 && isArmed) {
-            Location oldLocation = new Location(LocationManager.GPS_PROVIDER);
-            Location newLocation = new Location(LocationManager.GPS_PROVIDER);
-            oldLocation.setLatitude(this.latDeg);
-            oldLocation.setLongitude(this.lonDeg);
-            newLocation.setLatitude(newLatDeg);
-            newLocation.setLongitude(newLonDeg);
-            traveledDistance += oldLocation.distanceTo(newLocation);
-        }
-        this.latDeg = newLatDeg;
-        this.lonDeg = newLonDeg;
-    }
-
-    private boolean checkGpsFix(){
-        return fixType == FcCommon.GpsFixTypes.GPS_FIX_3D;
-    }
-
     private void checkModeFlags(){
         boolean isCamSwitch = false;
         boolean isArmed = false;
         FcCommon.BoxMode[] activeBoxModes = null;
         switch (fcVariant){
-            case FcInfo.FC_VARIANT_INAV:
-                activeBoxModes = FcCommon.getActiveBoxesInav(modeFlagsInav, boxIds);
-                break;
             case FcInfo.FC_VARIANT_BETAFLIGHT:
                 activeBoxModes = FcCommon.getActiveBoxesBtfl(modeFlagsBtfl, boxIds);
                 break;
@@ -677,43 +542,12 @@ public class Msp {
         telemetryOutputBuffer.offer(new TelemetryData(FcCommon.DD_TIMERS, writer.getData()));
     }
 
-    public void setRawRc(short[] rcChannels){
-        if (rcChannels == null || rcChannels.length > FcCommon.MAX_SUPPORTED_RC_CHANNEL_COUNT) return;
-        long current = System.currentTimeMillis();
-        if (current - rcLastFrame < rcMinPeriod) return;
-        rcLastFrame = current;
-        DataWriter writer = new DataWriter(false);
-        short[] mappedChannels = processRxMap(rcChannels);
-        for (short rcChannel : mappedChannels) {
-            writer.writeShort(rcChannel);
-        }
-        serial.writeDataMsp(getMspRequestWithPayload(FcCommon.MSP_SET_RAW_RC, writer.getData()), true);
-    }
-
-    private short[] processRxMap(short[] rcChannels){
-        if (rxMap == null || rxMap.length < 4) return rcChannels;
-        short[] mappedChannels = rcChannels.clone();
-        for (int i = 0; i < rxMap.length; i++) {
-            if (rxMap[i] < 0 || rxMap[i] >= rcChannels.length) return rcChannels;
-            mappedChannels[rxMap[i]] = rcChannels[i];
-        }
-        return mappedChannels;
-    }
-
     public void getBatteryState(){
         serial.writeDataMsp(getMspRequest(FcCommon.MSP_BATTERY_STATE), true);
     }
 
     public void getRxMap(){
         serial.writeDataMsp(getMspRequest(FcCommon.MSP_RX_MAP), true);
-    }
-
-    public void getInavStatus(){
-        serial.writeDataMsp(getMspRequest(FcCommon.MSP2_INAV_STATUS), true);
-    }
-
-    public void getInavAnalog(){
-        serial.writeDataMsp(getMspRequest(FcCommon.MSP2_INAV_ANALOG), true);
     }
 
     public void getAttitude(){
@@ -732,6 +566,18 @@ public class Msp {
         serial.writeDataMsp(getMspRequest(FcCommon.MSP_OSD_CONFIG), true);
     }
 
+    public void setMissionConfig(Config config) throws JsonProcessingException {
+        DataWriter writer = new DataWriter(false);
+        writer.writeUTF(config.serialize());
+        serial.writeDataMsp(getMspRequestWithPayload(FcCommon.MSP_SET_MISSION_CONFIG, writer.getData()), true);
+    }
+
+    public void sendDetectedTargets(DetectedTargetsData data) throws JsonProcessingException {
+        DataWriter writer = new DataWriter(false);
+        writer.writeUTF(data.serialize());
+        serial.writeDataMsp(getMspRequestWithPayload(FcCommon.MSP_SET_MISSION_CONFIG, writer.getData()), true);
+    }
+
     public void getBatteryConfig(){
         serial.writeDataMsp(getMspRequest(FcCommon.MSP_BATTERY_CONFIG), true);
     }
@@ -740,17 +586,9 @@ public class Msp {
         serial.writeDataMsp(getMspRequest(FcCommon.MSP_VTX_CONFIG), true);
     }
 
-    public void getBoxNames(){
-        serial.writeDataMsp(getMspRequest(FcCommon.MSP_BOXNAMES), true);
-    }
-
     public void getBoxNames(byte page){
         byte[] data = getMspRequestWithPayload(FcCommon.MSP_BOXNAMES, new byte[] { page });
         serial.writeDataMsp(data, true);
-    }
-
-    public void getBoxIds(){
-        serial.writeDataMsp(getMspRequest(FcCommon.MSP_BOXIDS), true);
     }
 
     public void getBoxIds(byte page){
@@ -788,9 +626,6 @@ public class Msp {
 
     public void getMixerConfig(){
         switch (fcVariant){
-            case FcInfo.FC_VARIANT_INAV:
-                serial.writeDataMsp(getMspRequest(FcCommon.MSP2_INAV_MIXER), false);
-                break;
             case FcInfo.FC_VARIANT_BETAFLIGHT:
                 serial.writeDataMsp(getMspRequest(FcCommon.MSP_MIXER_CONFIG), false);
                 break;

@@ -17,6 +17,8 @@
 
 package com.example.cameraxvideorecorder.infrastructure;
 
+import static com.example.cameraxvideorecorder.common.Logcat.log;
+
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -33,12 +35,14 @@ import com.example.cameraxvideorecorder.MainActivity;
 import com.example.cameraxvideorecorder.R;
 import com.example.cameraxvideorecorder.common.FcCommon;
 import com.example.cameraxvideorecorder.common.FcInfo;
+import com.example.cameraxvideorecorder.common.Messages;
+import com.fasterxml.jackson.core.JsonProcessingException;
 
 import java.util.Timer;
 import java.util.TimerTask;
 
-public class DDService extends Service {
-    public static final String CHANNEL_ID = "DDServiceChannel";
+public class AutopilotService extends Service {
+    public static final String CHANNEL_ID = "AutopilotServiceChannel";
     public static boolean isRunning = false;
     public static boolean isConnected = false;
     private static int serialPortStatus = Serial.STATUS_NOT_INITIALIZED;
@@ -47,10 +51,8 @@ public class DDService extends Service {
     private Timer mainTimer;
     private Serial serial;
     private Msp msp;
-    private int connectionMode;
 
-
-    public DDService() {
+    public AutopilotService() {
     }
 
     @Override
@@ -61,17 +63,13 @@ public class DDService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         isConnected = false;
-        String destIp = MainActivity.config.getIp();
-        int port = MainActivity.config.getPort();
-        String key = MainActivity.config.getKey();
-        connectionMode = MainActivity.config.getConnectionMode();
 
         createNotificationChannel();
         Intent notificationIntent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(getResources().getString(R.string.app_name))
-                .setContentText("DroidDrone is running")
+                .setContentText("Autopilot is running")
                 .setSmallIcon(R.drawable.baseline_rocket_launch_24)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
@@ -86,11 +84,25 @@ public class DDService extends Service {
 
         this.getExternalMediaDirs();
         if (serial != null) serial.close();
-        serial = new Serial(this);
+        serial = new Serial(this, MainActivity.config);
         msp = new Msp(serial);
         serial.initialize(msp);
         isRunning = true;
         startMainTimer();
+        Messages.onTargetsDetected.observeForever(value -> {
+            try {
+                msp.sendDetectedTargets(value);
+            } catch (JsonProcessingException e) {
+                log(e.toString());
+            }
+        });
+        Messages.onStartMission.observeForever(value -> {
+            try {
+                msp.setMissionConfig(value);
+            } catch (JsonProcessingException e) {
+                log(e.toString());
+            }
+        });
         return START_REDELIVER_INTENT;
     }
 
@@ -101,7 +113,7 @@ public class DDService extends Service {
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel serviceChannel = new NotificationChannel(CHANNEL_ID, "DD", NotificationManager.IMPORTANCE_HIGH);
+            NotificationChannel serviceChannel = new NotificationChannel(CHANNEL_ID, "Autopilot", NotificationManager.IMPORTANCE_HIGH);
             NotificationManager manager = getSystemService(NotificationManager.class);
             manager.createNotificationChannel(serviceChannel);
         }

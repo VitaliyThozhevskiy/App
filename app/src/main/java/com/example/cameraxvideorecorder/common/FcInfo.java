@@ -19,15 +19,9 @@ package com.example.cameraxvideorecorder.common;
 
 public class FcInfo {
     public static final byte FC_VARIANT_UNKNOWN = 0;
-    public static final byte FC_VARIANT_INAV = 1;
-    public static final byte FC_VARIANT_BETAFLIGHT = 2;
-    public static final byte FC_VARIANT_ARDUPILOT = 3;
-    public static final String INAV_ID = "INAV";
+    public static final byte FC_VARIANT_BETAFLIGHT = 1;
     public static final String BETAFLIGHT_ID = "BTFL";
-    public static final String ARDUPILOT_ID = "ARDU";
-    public static final String INAV_NAME = "INAV";
     public static final String BETAFLIGHT_NAME = "Betaflight";
-    public static final String ARDUPILOT_NAME = "ArduPilot";
     private final int fcVariant;
     private final int fcVersionMajor;
     private final int fcVersionMinor;
@@ -57,35 +51,11 @@ public class FcInfo {
     }
 
     public String getFcName(){
-        String name = "UNKNOWN";
-        switch (fcVariant){
-            case FC_VARIANT_INAV:
-                name = INAV_NAME;
-                break;
-            case FC_VARIANT_BETAFLIGHT:
-                name = BETAFLIGHT_NAME;
-                break;
-            case FC_VARIANT_ARDUPILOT:
-                name = ARDUPILOT_NAME;
-                break;
-        }
-        return name;
+        return BETAFLIGHT_NAME;
     }
 
     public int getFcVariant() {
         return fcVariant;
-    }
-
-    public int getFcVersionMajor() {
-        return fcVersionMajor;
-    }
-
-    public int getFcVersionMinor() {
-        return fcVersionMinor;
-    }
-
-    public int getFcVersionPatchLevel() {
-        return fcVersionPatchLevel;
     }
 
     public int getApiProtocolVersion() {
@@ -100,18 +70,10 @@ public class FcInfo {
         return apiVersionMinor;
     }
 
-    public int getPlatformType() {
-        return platformType;
-    }
-
     public String getPlatformTypeName(){
         switch (fcVariant){
-            case FC_VARIANT_INAV:
-                return FcCommon.PlatformTypesInav.getPlatforTypeName(platformType);
             case FC_VARIANT_BETAFLIGHT:
                 return FcCommon.PlatformTypesBtfl.getPlatforTypeName(platformType);
-            case FC_VARIANT_ARDUPILOT:
-                return FcCommon.PlatformTypesArduPilot.getPlatforTypeName(platformType);
         }
         return null;
     }

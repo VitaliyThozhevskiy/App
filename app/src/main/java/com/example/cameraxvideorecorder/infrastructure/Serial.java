@@ -34,6 +34,8 @@ import java.util.List;
 import android_serialport_api.SerialPortFinder;
 import tp.xmaihh.serialport.SerialHelper;
 import tp.xmaihh.serialport.bean.ComBean;
+
+import com.example.cameraxvideorecorder.common.Config;
 import com.example.cameraxvideorecorder.common.FcCommon;
 import com.example.cameraxvideorecorder.common.FcInfo;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
@@ -72,9 +74,11 @@ public class Serial {
     private int status;
     private SerialHelper serialHelper;
     private boolean restart;
+    private Config config;
 
-    public Serial(Context context){
+    public Serial(Context context, Config config){
         this.context = context;
+        this.config = config;
         threadsId = 0;
         msp = null;
         manager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
@@ -103,7 +107,7 @@ public class Serial {
             while (id == threadsId) {
                 try {
                     restart = false;
-                    if (config.isUseNativeSerialPort()){
+                    if (config.useNativeSerialPort){
                         if (openNativeSerialPort()) {
                             log("Native serial port is opened");
                             return;
@@ -140,8 +144,7 @@ public class Serial {
         int count = availableDrivers.size();
         for (int i = 0; i < count; i++) {
             String name = availableDrivers.get(i).getDevice().getManufacturerName();
-            if (count == 1 || FcInfo.INAV_ID.equals(name) || FcInfo.BETAFLIGHT_ID.equals(name) || FcInfo.BETAFLIGHT_NAME.equals(name)
-                    || FcInfo.ARDUPILOT_ID.equals(name) || FcInfo.ARDUPILOT_NAME.equals(name)) {
+            if (count == 1 || FcInfo.BETAFLIGHT_ID.equals(name) || FcInfo.BETAFLIGHT_NAME.equals(name)) {
                 driver = availableDrivers.get(i);
                 status = STATUS_DEVICE_FOUND;
                 log("Serial device manufacturer name: " + name);
@@ -192,7 +195,7 @@ public class Serial {
                     log("Native serial port found: " + port);
                 }
             }
-            serialHelper = new SerialHelper(config.getNativeSerialPort(), config.getSerialBaudRate()) {
+            serialHelper = new SerialHelper(config.nativeSerialPort, config.serialBaudRate) {
                 @Override
                 protected void onDataReceived(ComBean comBean) {
                     try {
@@ -239,10 +242,10 @@ public class Serial {
             status = STATUS_USB_PERMISSION_DENIED;
             return false;
         }
-        port = driver.getPorts().get(config.getUsbSerialPortIndex());
+        port = driver.getPorts().get(config.usbSerialPortIndex);
         try {
             port.open(connection);
-            port.setParameters(config.getSerialBaudRate(), serialDataBits, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+            port.setParameters(config.serialBaudRate, serialDataBits, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
         } catch (IOException e) {
             status = STATUS_SERIAL_PORT_ERROR;
             log("USB Serial error: " + e);
@@ -293,7 +296,7 @@ public class Serial {
         if (checkMspCompatibility && FcCommon.getFcApiCompatibilityLevel(msp.getFcInfo()) != FcCommon.FC_API_COMPATIBILITY_OK
                 && FcCommon.getFcApiCompatibilityLevel(msp.getFcInfo()) != FcCommon.FC_API_COMPATIBILITY_WARNING) return;
         try {
-            if (config.isUseNativeSerialPort()){
+            if (config.useNativeSerialPort){
                 if (serialHelper != null && serialHelper.isOpen()) serialHelper.send(data);
             }else{
                 if (port != null && port.isOpen()) port.write(data, serialPortReadWriteTimeoutMs);
@@ -306,7 +309,7 @@ public class Serial {
     public void writeDataMavlink(byte[] data){
         if (status != STATUS_SERIAL_PORT_OPENED || data == null) return;
         try {
-            if (config.isUseNativeSerialPort()){
+            if (config.useNativeSerialPort){
                 if (serialHelper != null && serialHelper.isOpen()) serialHelper.send(data);
             }else{
                 if (port != null && port.isOpen()) port.write(data, serialPortReadWriteTimeoutMs);

@@ -1,6 +1,8 @@
 package com.example.cameraxvideorecorder;
 
-public class BoundingBox {
+import com.example.cameraxvideorecorder.common.ISerializable;
+
+public class BoundingBox implements ISerializable {
     public float x1;
     public float y1;
     public float x2;
